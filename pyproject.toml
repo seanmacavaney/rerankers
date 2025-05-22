@@ -74,6 +74,7 @@ rankllm = [
   "nmslib-metabrainz; python_version >= '3.10'",
   "rank-llm; python_version >= '3.10'"
 ]
+pylate = ["pylate"]
 pyterrier = [
   "python-terrier >= 0.11.0",
   "pyterrier-alpha >= 0.2.0"
