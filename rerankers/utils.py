@@ -95,7 +95,7 @@ def prep_docs(
                 doc_ids = list(range(len(docs)))
 
         if metadata is not None:
-            if docs[0].meatadata is not None:
+            if docs[0].metadata is not None:
                 print(
                     "Overriding doc_ids passed within the Document objects with explicitly passed doc_ids!"
                 )
