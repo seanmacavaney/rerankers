@@ -1,30 +1,80 @@
-from typing import Any
+"""`PyTerrier <https://github.com/terrier-org/pyterrier>`__ integration for rerankers.
+
+This module exposes :class:`~rerankers.integrations.pyterrier.RerankersTransformer`, a PyTerrier transformer that
+wraps any :class:`~rerankers.models.ranker.BaseRanker` so it can be dropped into a PyTerrier retrieval
+pipeline. You normally obtain one by calling
+:meth:`~rerankers.models.ranker.BaseRanker.as_pyterrier_transformer` on a loaded reranker.
+"""
+
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import pyterrier as pt
-import pyterrier_alpha as pta
+
+from rerankers.models.ranker import BaseRanker
 
 
-class RerankerPyterrierTransformer(pt.Transformer):
-    def __init__(self, model: Any):
-        self.model = model
+class RerankersTransformer(pt.Transformer):
+    """A PyTerrier transformer that reranks retrieved results using a rerankers model.
+
+    The transformer consumes a PyTerrier result frame (with ``qid``, ``query``, ``docno`` and ``text``
+    columns) and reranks the documents independently for each query using the wrapped
+    :class:`~rerankers.models.ranker.BaseRanker`. The ``score`` and ``rank`` columns are replaced with the
+    values produced by the reranker.
+
+    It is usually placed after a first-stage retriever and a step that attaches the document text (e.g.,
+    :func:`pyterrier.text.get_text`). Rather than constructing it directly, call
+    :meth:`~rerankers.models.ranker.BaseRanker.as_pyterrier_transformer` on a loaded reranker:
+
+    .. code-block:: python
+        :caption: Rerank BM25 results with a cross-encoder
+
+        >>> import pyterrier as pt
+        >>> from rerankers import Reranker
+        >>> dataset = pt.get_dataset('irds:vaswani')
+        >>> index = pt.Artifact.from_hf('pyterrier/vaswani.terrier')
+        >>> reranker = Reranker('cross-encoder') # loads mixedbread-ai/mxbai-rerank-base-v1
+        >>> # Retrieve with BM25, load the document text, then re-rank
+        >>> pipeline = index.bm25() >> dataset.text_loader() >> reranker.as_pyterrier_transformer()
+        >>> pipeline.search('chemical reactions')
+    """
+
+    def __init__(self, ranker: BaseRanker):
+        """Wrap a rerankers model as a PyTerrier transformer.
+
+        Args:
+            ranker: The loaded reranker to apply. This is any
+                :class:`~rerankers.models.ranker.BaseRanker`, e.g., the object returned by
+                :func:`rerankers.Reranker`.
+        """
+        self.ranker = ranker
 
     def transform(self, inp: pd.DataFrame) -> pd.DataFrame:
+        """Rerank an input result frame.
 
-        pta.validate.result_frame(inp, ['query', 'text'])
-        return pt.apply.by_query(self._transform_by_query)(inp)
+        Args:
+            inp: A result frame with (at least) ``qid``, ``query``, ``docno`` and ``text`` columns. The
+                frame is reranked independently for each query (grouped by ``qid``).
 
-    def _transform_by_query(self, query_inp: pd.DataFrame) -> pd.DataFrame:
+        Returns:
+            pd.DataFrame: A copy of ``inp`` with updated ``score`` and ``rank`` columns, sorted by
+            descending score within each query.
+        """
+        pt.validate.result_frame(inp, ['query', 'text'])
+        inp = inp.reset_index(drop=True)
+        scores = {}
+        for _, query_frame in inp.groupby('qid', sort=False):
+            # Map the scores back to row by index
+            results = self.ranker.rank(
+                query=query_frame['query'].iloc[0],
+                docs=query_frame['text'].tolist(),
+                doc_ids=list(query_frame.index),
+            )
+            scores.update({r.doc_id: r.score for r in results})
+        result = inp.assign(score=scores)
+        result = pt.model.add_ranks(result)
+        return result.sort_values(['qid', 'rank'])
 
-        results = self.model.rank(
-            query=query_inp['query'].iloc[0],
-            docs=query_inp['text'].tolist(),
-            doc_ids=query_inp['docno'].tolist()
-        )
-
-        doc_score_mapping = {r.doc_id: r.score for r in results}
-        new_scores = [doc_score_mapping[doc_id] for doc_id in query_inp['docno'].tolist()]
-
-        res = query_inp.assign(score=new_scores)
-        res = res.sort_values('score', ascending=False)
-        return pt.model.add_ranks(res)
+    def schematic(self, *, input_columns: Optional[List[str]] = None) -> Dict[str, Any]:
+        # Label the schematic with the name of the reranker class
+        return {'label': type(self.ranker).__name__}
