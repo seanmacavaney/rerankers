@@ -73,7 +73,12 @@ class RerankersTransformer(pt.Transformer):
                 docs=query_frame[self.text_field].tolist(),
                 doc_ids=list(query_frame.index),
             )
-            scores.update({r.doc_id: r.score for r in results})
+            if results.has_scores:
+                scores.update({r.doc_id: r.score for r in results})
+            else:
+                # Listwise rerankers (e.g., RankGPT, RankLLM) return a ranking but no scores;
+                # fall back to the rank so the best (rank 1) gets the highest score.
+                scores.update({r.doc_id: -r.rank for r in results})
         result = inp.assign(score=scores)
         result = pt.model.add_ranks(result)
         return result.sort_values(['qid', 'rank'])

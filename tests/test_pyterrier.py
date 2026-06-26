@@ -42,6 +42,27 @@ class FakeRanker(BaseRanker):
         return RankedResults(results=ranked, query=query, has_scores=True)
 
 
+class RankingOnlyRanker(BaseRanker):
+    """A listwise-style reranker that returns ranks only (no scores), like RankGPT/RankLLM.
+
+    It ranks the last input document first (reverses the input) and sets ``has_scores=False``.
+    """
+
+    def __init__(self):
+        pass
+
+    def score(self, query, doc):
+        return 0.0
+
+    def rank(self, query, docs, doc_ids=None):
+        order = list(reversed(range(len(docs))))  # best -> worst by input position
+        results = [
+            Result(document=Document(doc_id=doc_ids[orig], text=docs[orig]), rank=pos + 1)
+            for pos, orig in enumerate(order)
+        ]
+        return RankedResults(results=results, query=query, has_scores=False)
+
+
 def _result_frame(rows):
     return pd.DataFrame(rows, columns=["qid", "query", "docno", "text", "score", "rank"])
 
@@ -138,3 +159,20 @@ def test_custom_text_field_is_validated():
 def test_as_pyterrier_transformer_passes_text_field():
     transformer = FakeRanker().as_pyterrier_transformer(text_field="body")
     assert transformer.text_field == "body"
+
+
+def test_ranking_only_reranker_uses_rank():
+    # Listwise rerankers (RankGPT, RankLLM) return ranks without scores; the transformer must
+    # fall back to the rank instead of crashing on the missing (None) scores.
+    transformer = RerankersTransformer(RankingOnlyRanker())
+    inp = _result_frame([
+        ["q1", "hello", "d0", "first doc", 9.0, 0],
+        ["q1", "hello", "d1", "second doc", 8.0, 1],
+        ["q1", "hello", "d2", "third doc", 7.0, 2],
+    ])
+
+    out = transformer.transform(inp)
+
+    # RankingOnlyRanker ranks the last input doc first, so the output order reverses.
+    assert list(out["docno"]) == ["d2", "d1", "d0"]
+    assert list(out["rank"]) == [0, 1, 2]
