@@ -39,35 +39,38 @@ class RerankersTransformer(pt.Transformer):
         >>> pipeline.search('chemical reactions')
     """
 
-    def __init__(self, ranker: BaseRanker):
+    def __init__(self, ranker: BaseRanker, *, text_field: str = 'text'):
         """Wrap a rerankers model as a PyTerrier transformer.
 
         Args:
             ranker: The loaded reranker to apply. This is any
                 :class:`~rerankers.models.ranker.BaseRanker`, e.g., the object returned by
                 :func:`rerankers.Reranker`.
+            text_field: The input column holding the document text to rerank. Defaults to ``'text'``.
         """
         self.ranker = ranker
+        self.text_field = text_field
 
     def transform(self, inp: pd.DataFrame) -> pd.DataFrame:
         """Rerank an input result frame.
 
         Args:
-            inp: A result frame with (at least) ``qid``, ``query``, ``docno`` and ``text`` columns. The
-                frame is reranked independently for each query (grouped by ``qid``).
+            inp: A result frame with (at least) ``qid``, ``query``, ``docno`` and the text column
+                (``text_field``, ``'text'`` by default). The frame is reranked independently for each
+                query (grouped by ``qid``).
 
         Returns:
             pd.DataFrame: A copy of ``inp`` with updated ``score`` and ``rank`` columns, sorted by
             descending score within each query.
         """
-        pt.validate.result_frame(inp, ['query', 'text'])
+        pt.validate.result_frame(inp, ['query', self.text_field])
         inp = inp.reset_index(drop=True)
         scores = {}
         for _, query_frame in inp.groupby('qid', sort=False):
             # Map the scores back to row by index
             results = self.ranker.rank(
                 query=query_frame['query'].iloc[0],
-                docs=query_frame['text'].tolist(),
+                docs=query_frame[self.text_field].tolist(),
                 doc_ids=list(query_frame.index),
             )
             scores.update({r.doc_id: r.score for r in results})

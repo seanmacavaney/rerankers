@@ -111,3 +111,30 @@ def test_schematic_label():
     transformer = RerankersTransformer(FakeRanker())
     assert isinstance(transformer, HasSchematic)
     assert transformer.schematic(input_columns=None) == {"label": "FakeRanker"}
+
+
+def test_custom_text_field():
+    # The text column can be configured (mirrors pyterrier_t5's ``text_field``).
+    transformer = RerankersTransformer(FakeRanker(), text_field="body")
+    inp = pd.DataFrame(
+        [["q1", "hello", "d0", "first doc", 9.0, 0],
+         ["q1", "hello", "d1", "second doc", 8.0, 1]],
+        columns=["qid", "query", "docno", "body", "score", "rank"],
+    )
+    out = transformer.transform(inp)
+    # FakeRanker scores by input position, so the order reverses.
+    assert list(out["docno"]) == ["d1", "d0"]
+    assert list(out["score"]) == [1.0, 0.0]
+
+
+def test_custom_text_field_is_validated():
+    transformer = RerankersTransformer(FakeRanker(), text_field="body")
+    # Frame has 'text' but not the configured 'body' column -> rejected.
+    bad = _result_frame([["q1", "hello", "d0", "a doc", 1.0, 0]])
+    with pytest.raises(pt.validate.InputValidationError):
+        transformer.transform(bad)
+
+
+def test_as_pyterrier_transformer_passes_text_field():
+    transformer = FakeRanker().as_pyterrier_transformer(text_field="body")
+    assert transformer.text_field == "body"

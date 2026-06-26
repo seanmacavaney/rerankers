@@ -51,12 +51,15 @@ class BaseRanker(ABC):
                 'Please run `pip install "rerankers[langchain]"` to get all the required dependencies.'
             )
 
-    def as_pyterrier_transformer(self):
+    def as_pyterrier_transformer(self, *, text_field: str = 'text'):
         """Create a `PyTerrier <https://github.com/terrier-org/pyterrier>`__ transformer that reranks with this model.
 
         The returned transformer can be inserted into a PyTerrier pipeline to rerank a set of retrieved
         results. It expects an input frame with ``query``, ``docno`` and ``text`` columns and replaces the
         ``score`` and ``rank`` columns with the values produced by this reranker.
+
+        Args:
+            text_field: The input column holding the document text to rerank. Defaults to ``'text'``.
 
         Returns:
             :class:`~rerankers.integrations.pyterrier.RerankersTransformer`: A PyTerrier transformer wrapping this model.
@@ -79,7 +82,7 @@ class BaseRanker(ABC):
         try:
             from rerankers.integrations.pyterrier import RerankersTransformer
 
-            return RerankersTransformer(self)
+            return RerankersTransformer(self, text_field=text_field)
         except ImportError:
             print(
                 "You need to install pyterrier to export a reranker as a PyTerrier Transformer!"
